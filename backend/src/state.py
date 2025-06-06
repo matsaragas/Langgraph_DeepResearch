@@ -12,6 +12,6 @@ class OverallState(TypedDict):
     search_query: Annotated[list, operator.add]
     web_search_results = Annotated[list, operator.add]
     sources_gathered = Annotated[list, operator.add]
-    
+
 
 
