@@ -7,7 +7,7 @@ from backend.src.state import WebSearchState
 
 from backend.src.configuration import Configuration
 from backend.src.tools_and_schemas import SearchQueryList, Reflection
-from backend.src.utils import get_current_date
+from backend.src.utils import get_current_date, resolve_urls, get_citations
 
 from backend.src.prompts import query_writer_instructions
 from backend.src.prompts import web_research_instructions
@@ -17,6 +17,12 @@ from backend.src.prompts import reflection_instructions
 from backend.src.utils import get_research_topic
 
 from langchain_openai import ChatOpenAI
+
+from google.genai import Client
+import os
+
+
+genai_client = Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
 def generate_query(state: OverallState, config: RunnableConfig) -> QueryGeneratingState:
@@ -63,6 +69,31 @@ def web_research(state: WebSearchState, config: RunnableConfig) -> OverallState:
         current_date=get_current_date(),
         research_topic=state["search_query"]
     )
+
+    response = genai_client.models.generate_content(
+        model=configurable.query_generator_model,
+        contents=formatted_prompt,
+        config={
+            "tools": [{"google_search": {}}],
+            "temperature": 0,
+        },
+    )
+    # resolve the urls to short urls for saving tokens and time
+    resolved_urls = resolve_urls(
+        response.candidates[0].grounding_metadata.grounding_chunks, state["id"]
+    )
+
+    citations = get_citations(response, resolved_urls)
+    modified_text = insert_citation_markers(response.text, citations)
+    sources_gathered = [item for citation in citations for item in citation["segments"]]
+
+    return {
+        "sources_gathered": sources_gathered,
+        "search_query": [state["search_query"]],
+        "web_research_result": [modified_text],
+    }
+
+
 
 
 def reflection(state: OverallState, config: RunnableConfig) -> ReflectionState:
