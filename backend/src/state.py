@@ -23,7 +23,7 @@ class Query(TypedDict):
     rational: str
 
 
-class QueryGeneratingState(TypedDict):
+class QueryGenerationState(TypedDict):
     query_list: list[Query]
 
 

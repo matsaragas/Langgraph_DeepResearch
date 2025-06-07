@@ -11,7 +11,6 @@ class SearchQueryList(BaseModel):
     )
 
 
-
 class Reflection(BaseModel):
     is_sufficient: bool = Field(
         description="Whether the provided summaries are sufficient to answer the user's question."

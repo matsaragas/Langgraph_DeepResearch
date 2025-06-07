@@ -1,0 +1,4 @@
+langgraph==0.4.8
+langchain-openai=0.3.21
+google-api-python-client==2.171.0
+google-genai==1.19.0

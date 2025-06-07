@@ -1,20 +1,22 @@
-from backend.src.state import OverallState
+
 from langchain_core.runnables import RunnableConfig
+from langchain_core.messages import AIMessage
+from langgraph.types import Send
 
-from backend.src.state import QueryGeneratingState
-from backend.src.state import WebSearchState
-
-
-from backend.src.configuration import Configuration
-from backend.src.tools_and_schemas import SearchQueryList, Reflection
-from backend.src.utils import get_current_date, resolve_urls, get_citations
-
-from backend.src.prompts import query_writer_instructions
-from backend.src.prompts import web_research_instructions
-from backend.src.prompts import reflection_instructions
+from state import WebSearchState, ReflectionState, QueryGenerationState, OverallState
 
 
-from backend.src.utils import get_research_topic
+from configuration import Configuration
+from tools_and_schemas import SearchQueryList, Reflection
+from utils import get_current_date, resolve_urls, get_citations, insert_citation_markers
+
+from prompts import (reflection_instructions,
+                     answer_instructions,
+                     web_research_instructions,
+                     query_writer_instructions)
+
+
+from utils import get_research_topic
 
 from langchain_openai import ChatOpenAI
 
@@ -22,10 +24,10 @@ from google.genai import Client
 import os
 
 
-genai_client = Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
-def generate_query(state: OverallState, config: RunnableConfig) -> QueryGeneratingState:
+
+def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerationState:
     """LangGraph node that generates a search query based on the User's questions
     Args:
         state: Current Graph state containing user's question
@@ -54,6 +56,16 @@ def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerati
     return {"query_list": result.query}
 
 
+def continue_to_web_research(state: QueryGenerationState):
+    """LangGraph node that sends the search queries to the web research node.
+
+    This is used to spawn n number of web research nodes, one for each search query.
+    """
+    return [
+        Send("web_research", {"search_query": search_query, "id": int(idx)})
+        for idx, search_query in enumerate(state["query_list"])
+    ]
+
 def web_research(state: WebSearchState, config: RunnableConfig) -> OverallState:
     """LangGraph node that performs web research using the native Google Search API.
     Args:
@@ -69,6 +81,8 @@ def web_research(state: WebSearchState, config: RunnableConfig) -> OverallState:
         current_date=get_current_date(),
         research_topic=state["search_query"]
     )
+
+    genai_client = Client(api_key=os.getenv("GEMINI_API_KEY"))
 
     response = genai_client.models.generate_content(
         model=configurable.query_generator_model,
@@ -92,8 +106,6 @@ def web_research(state: WebSearchState, config: RunnableConfig) -> OverallState:
         "search_query": [state["search_query"]],
         "web_research_result": [modified_text],
     }
-
-
 
 
 def reflection(state: OverallState, config: RunnableConfig) -> ReflectionState:
@@ -129,6 +141,39 @@ def reflection(state: OverallState, config: RunnableConfig) -> ReflectionState:
     }
 
 
+def evaluate_search(state: ReflectionState, config: RunnableConfig,
+) -> OverallState:
+
+    """
+    Langgraph routing function that determines the next step in the research flow.
+
+    Controls the research loop by deciding whether to continue gathering information or
+    to finalize the summary based on the configured maximim number of research loops
+    :param state:
+    :param config:
+    :return: A String literal indicating the next node to visit ("web_research" or "finalize_summary")
+    """
+    configurable = Configuration.from_runnable_config(config)
+    max_research_loops = (
+        state.get("max_research_loops")
+        if state.get("max_research_loops") is not None
+        else configurable.max_reseach_loops
+    )
+    if state["is_sufficient"] or state["research_loop_count"] >= max_research_loops:
+        return "finalize_answer"
+    else:
+        return [
+            Send(
+                "web_research",
+                {
+                    "search_query": follow_up_query,
+                    "id": state["number_of_ran_queries"] + int(idx)
+                },
+            )
+            for idx, follow_up_query in enumerate(state["follow_up_queries"])
+        ]
+
+
 def finalize_answer(state: OverallState, config: RunnableConfig):
     """Langgraph node that finalizes the research query
     Prepares the final output by de-duplicating and formatting sources, then
@@ -149,6 +194,28 @@ def finalize_answer(state: OverallState, config: RunnableConfig):
         research_topic=get_research_topic(state["messages"]),
         summaries="\n---\n\n".join(state["web_research_result"]),
     )
+    llm = ChatOpenAI(
+        model=reasoning_model,
+        temperature=1.0,
+        max_retries=2,
+        api_key="API_KEY"
+    )
+    result = llm.invoke(formatted_prompt)
+
+    unique_sources = []
+    for source in state["sources_gathered"]:
+        if source["short_url"] in result.content:
+            result.content = result.content.replace(
+                source["short_url"], source["value"]
+            )
+            unique_sources.append(source)
+
+    return {
+        "messages": [AIMessage(content=result.content)],
+        "sources_gathered": unique_sources,
+    }
+
+
 
 
 
