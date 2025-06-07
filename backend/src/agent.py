@@ -4,9 +4,10 @@ from backend.src.state import OverallState
 
 from backend.src.nodes import generate_query
 from backend.src.nodes import web_research
-from backend.src.nodes import reflection
+from backend.src.nodes import reflection, finalize_answer
 
 builder = StateGraph(OverallState, config_schema=Configuration)
 builder.add_node("generate_query", generate_query)
 builder.add_node("web_research", web_research)
 builder.add_node("reflection", reflection)
+builder.add_node("finalize_answer", finalize_answer)

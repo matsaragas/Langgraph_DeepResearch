@@ -6,7 +6,7 @@ from backend.src.state import WebSearchState
 
 
 from backend.src.configuration import Configuration
-from backend.src.tools_and_schemas import SearchQueryList
+from backend.src.tools_and_schemas import SearchQueryList, Reflection
 from backend.src.utils import get_current_date
 
 from backend.src.prompts import query_writer_instructions
@@ -77,7 +77,41 @@ def reflection(state: OverallState, config: RunnableConfig) -> ReflectionState:
     reasoning_model = state.get("reasoning_model") or configurable.reasoning_model
 
     current_date = get_current_date()
-    formatted_prompt = reflection_instructions.format()
+    formatted_prompt = reflection_instructions.format(
+        current_date=current_date,
+        research_topic=get_research_topic(state["messages"]),
+        summaries="\n\n---\n\n".join(state["web_research_result"])
+    )
+    llm = ChatOpenAI(
+        model=configurable.query_generator_model,
+        temperature=1.0,
+        max_retries=2,
+        api_key="API_KEY"
+    )
+    result = llm.with_structured_output(Reflection).invoke(formatted_prompt)
+    return {
+        "is_sufficient": result.is_sufficient,
+        "knowledge_gap": result.knowledge_gap,
+        "follow_up_queries": result.follow_up_queries,
+        "research_loop_count": result.research_loop_count,
+        "number_of_ran_queries": len(state["search_query"])
+    }
+
+
+def finalize_answer(state: OverallState, config: RunnableConfig):
+    """Langgraph node that finalizes the research query
+    Prepares the final output by de-duplicating and formatting sources, then
+    combining them with the running summary to create a well-structured research
+    report with proper citations.
+    Args:
+        state: Current graph state containing the running summary and sources gathered.
+
+    Returns:
+        Dictionaries with state update, including running_summary key containing the
+        formatted final summary with sources.
+    """
+
+
 
 
 
