@@ -141,6 +141,14 @@ def finalize_answer(state: OverallState, config: RunnableConfig):
         Dictionaries with state update, including running_summary key containing the
         formatted final summary with sources.
     """
+    configurable = Configuration.from_runnable_config(config)
+    reasoning_model = state.get("reasoning_model") or configurable.reasoning_model
+    current_date = get_current_date()
+    formatted_prompt = answer_instructions.format(
+        current_date=current_date,
+        research_topic=get_research_topic(state["messages"]),
+        summaries="\n---\n\n".join(state["web_research_result"]),
+    )
 
 
 
