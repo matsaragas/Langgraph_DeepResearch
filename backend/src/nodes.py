@@ -24,9 +24,6 @@ from google.genai import Client
 import os
 
 
-
-
-
 def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerationState:
     """LangGraph node that generates a search query based on the User's questions
     Args:
