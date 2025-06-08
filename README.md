@@ -1,7 +1,24 @@
-# Deep Research
+# Agent AI for Deep Research
+The aim of this repository is to develop an Agentic AI solution using LangGraph that can answer complex queries by 
+retrieving relevant information from the web. The code and the idea has been taken from [Google-Gemini](https://github.com/google-gemini/gemini-fullstack-langgraph-quickstart):
+
+The Agent is designed to perform comprehensive research on a user's query by:
+
+* Dynamically generating relevant search terms
+
+* Querying the web using Google Search
+
+* Reflecting on the retrieved results to identify knowledge gaps
+
+* Iteratively refining its search strategy
+
+* Providing a well-supported final answer with citations
+
 
 ![Alt Text](figures/graph_search_1.png)
 
+
+### Graph State
 
 The graph's share state called `OverallState` and is defined as per below:
 
@@ -33,44 +50,118 @@ builder = StateGraph(OverallState, config_schema=Configuration)
 1. The first node in the graph is `generate_query`, whose role is to generate a search query 
 based on the User's questions. For example,
 
-  ```python
-  Topic: What revenue grew more last year apple stock or the number of people buying an iphone
-  ```json
-  {{
+   ```python
+      Topic: What revenue grew more last year apple stock or the number of people buying an iphone
+     {{
     "rationale": "To answer this comparative growth question accurately, we need specific data points on Apple's stock performance and iPhone sales metrics. These queries target the precise financial information needed: company revenue trends, product-specific unit sales figures, and stock price movement over the same fiscal period for direct comparison.",
     "query": ["Apple total revenue growth fiscal year 2024", "iPhone unit sales growth fiscal year 2024", "Apple stock price growth fiscal year 2024"],
-  }}
-  ```
+     }}
+     ```
 
-So, the `generate_query` node returns a list of queries:
+   So, the `generate_query` node returns a list of queries:
 
-```python
-return {"query_list": result.query}
-```
+   ```python
+   return {"query_list": result.query}
+   ```
 
 2. The second node called `web_search` sends the search queries to the web research node. A `conditional_edge` is added between
    `generate_query` and `web_search`, and the function called `continue_to_web_research` (which is part of the graph) that sends the search queries 
    to the `web_research`. This is used to spawn n number of web research nodes, one for each search query.
    
-```python
-def continue_to_web_research(state: QueryGenerationState):
-    """LangGraph node that sends the search queries to the web research node.
+   ```python
+   def continue_to_web_research(state: QueryGenerationState):
+       """LangGraph node that sends the search queries to the web research node.
 
-    This is used to spawn n number of web research nodes, one for each search query.
-    """
-    return [
-        Send("web_research", {"search_query": search_query, "id": int(idx)})
-        for idx, search_query in enumerate(state["query_list"])
-    ]
-```
+          This is used to spawn n number of web research nodes, one for each search query.
+       """
+       return [
+           Send("web_research", {"search_query": search_query, "id": int(idx)})
+           for idx, search_query in enumerate(state["query_list"])
+       ]
+   ```
 
    The state of the `continue_to_web_research` is:
 
-```python
-class QueryGenerationState(TypedDict):
-    query_list: list[Query]
-```
+   ```python
+   class QueryGenerationState(TypedDict):
+       query_list: list[Query]
+   ```
 
-which matches with the output schema of the previous node in the graph: `generate_query`. The output 
-schema of the `continue_to_web_research`
+   which matches with the output schema of the previous node in the graph: `generate_query`. The output 
+   schema of the `continue_to_web_research` is described below:
+
+   ```python
+   return [
+           Send("web_research", {"search_query": search_query, "id": int(idx)})
+           for idx, search_query in enumerate(state["query_list"])
+       ]
+   ```
+
+   This output schema matches the state of the `web_search` node: 
+
+   ```python 
+   def web_research(state: WebSearchState, config: RunnableConfig) -> OverallState:
+   ```
+   where the state `WebSearchState`
+
+   ```python
+   class WebSearchState(TypedDict):
+       search_query: str
+       id: str
+   ```
+
+   The `web_research` node return the following:
+
+   ```python
+   return {
+   "sources_gathered": sources_gathered,
+   "search_query": [state["search_query"]],
+   "web_research_result": [modified_text],
+   }
+   ```
+
+   which all the above output is part of the `OverallState` and used to update it.
+
+
+3. The third node graph is called `reflection`. The `web_research` node is connected directly with the `reflection_node`
+   The state of the `reflection` node is the `OverallState`: 
+   ```python
+   def reflection(state: OverallState, config: RunnableConfig) -> ReflectionState:
+   ```
+   The role of the reflection node is to identify knowledge gaps and generates potential follow-up series. 
+   The `reflection` node is taking into account the `web_research_result` that was generated by the `web_research` and 
+   is reflected in the `OverallState` The `reflection` node generates the following:
+   ```python
+   return {
+   "is_sufficient": result.is_sufficient,
+   "knowledge_gap": result.knowledge_gap,
+   "follow_up_queries": result.follow_up_queries,
+   "research_loop_count": result.research_loop_count,
+   "number_of_ran_queries": len(state["search_query"])
+   }
+   ```
+   Below example shows an output of the reflection node:
+   
+   ```json
+   {{
+       "is_sufficient": true, // or false
+       "knowledge_gap": "The summary lacks information about performance metrics and benchmarks", // "" if is_sufficient is true
+       "follow_up_queries": ["What are typical performance benchmarks and metrics used to evaluate [specific technology]?"] // [] if is_sufficient is true
+   }}
+   ```
+   The `reflection` node is connected to either the `web_research` node (when extracted information is not sufficient) or the
+   `finalize_answer` node when the `web_research_result` is sufficient. To achive this, a `condictional_edge` is used:
+   ```python
+   builder.add_conditional_edges("reflection", evaluate_search, ["web_research", "finalize_answer"])
+   ```
+   where the node/function `evaluate_search` simply determines whether to choose the `web_research` node or the 
+   `finalize_answer` node.
+   
+4. Finally, the `finalize_answer` node summarizes the findings and provide a clear response along with 
+   the associated citations. The state of the `finalize_answer` is the `OverallState` which has been lastly 
+   updated by the `web_research` node with the information stored in the `web_research_result`.
+
+
+
+   
 
