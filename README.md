@@ -15,10 +15,14 @@ The Agent is designed to perform comprehensive research on a user's query by:
 * Providing a well-supported final answer with citations
 
 
+## Graph State
+
+The LangGraph of the proposed agent is described below:
+
 ![Alt Text](figures/graph_search_1.png)
 
 
-### Graph State
+
 
 The graph's share state called `OverallState` and is defined as per below:
 
@@ -45,7 +49,7 @@ builder = StateGraph(OverallState, config_schema=Configuration)
 ```
 
 
-### Graph Nodes
+## Graph Nodes
 
 1. The first node in the graph is `generate_query`, whose role is to generate a search query 
 based on the User's questions. For example,
